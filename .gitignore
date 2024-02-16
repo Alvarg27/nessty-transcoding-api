@@ -104,4 +104,7 @@ service_key.json
 # TernJS port file
 .tern-port
 
+.starting_script.bash
+starting_script.bash
+
 app.yaml
