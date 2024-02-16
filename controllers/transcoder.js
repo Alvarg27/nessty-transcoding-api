@@ -1,12 +1,12 @@
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
 const ffprobeInstaller = require("@ffprobe-installer/ffprobe");
-const { extname, resolve } = require("path");
+
 const fs = require("fs");
 const path = require("path");
-const TranscoderConfig = require("../config/transcoder.cofig.json");
+
 const createHttpError = require("http-errors");
-const { existsSync, mkdirSync, unlink } = fs;
+
 const { Readable } = require("stream");
 const tmpDir = require("os").tmpdir();
 
@@ -183,10 +183,8 @@ exports.transcoderVideo = async (req, res, next) => {
       (x) => videoMetadata.height >= x?.resolution?.split("x")[1]
     );
 
-    for (let i = 0; i < filteredStreams.length; i++) {
-      const config = filteredStreams[i];
-      await processVideo(req.file.buffer, fileId, config);
-    }
+    await processVideo(req.file.buffer, fileId, filteredStreams);
+
     await createMasterPlaylist(filteredStreams, fileId);
 
     res.send(fileId);
@@ -199,29 +197,33 @@ exports.transcoderVideo = async (req, res, next) => {
 // PROCESS FILE
 ////////////////////////////
 
-const processVideo = (buffer, fileId, config) => {
+const processVideo = (buffer, fileId, filteredStreams) => {
   return new Promise((resolve, reject) => {
     const uniqueDir = path.join(tmpDir, uuidv4());
     fs.mkdirSync(uniqueDir);
     const command = ffmpeg({
       source: Readable.from(buffer, { objectMode: false }),
       nolog: false,
-    })
-      .setFfmpegPath(ffmpegInstaller.path)
-      .output(path.join(uniqueDir, config.playlistFile))
-      .videoCodec("libx264")
-      .audioCodec("aac")
-      .size(`${config.resolution}`)
-      .outputOptions([...config.outputOptions])
-      .on("error", (err) => {
-        console.info("error", err);
-        reject(err);
-      })
+    }).setFfmpegPath(ffmpegInstaller.path);
+    for (let i = 0; i < filteredStreams.length; i++) {
+      const config = filteredStreams[i];
+      command
+        .output(path.join(uniqueDir, config.playlistFile))
+        .videoCodec("libx264")
+        .audioCodec("aac")
+        .size(`${config.resolution}`)
+        .outputOptions([...config.outputOptions])
+        .on("error", (err) => {
+          console.info("error", err);
+          reject(err);
+        });
+    }
+    command
       .on("progress", (progress) => {
         console.info("progress", progress);
       })
       .on("end", async () => {
-        console.log(`HLS ${config.resolution} segmenting complete`);
+        console.log(`Processing complete`);
         //////////////////////////////
         // UPLOAD TO GOOGLE CLOUD
         //////////////////////////////
