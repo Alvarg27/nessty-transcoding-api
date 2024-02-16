@@ -4,6 +4,7 @@ const morgan = require("morgan");
 const cors = require("cors");
 require("./helpers/initMongoDb");
 const videoRoute = require("./routes/video");
+const createHttpError = require("http-errors");
 const app = express();
 
 // RATE LIMITER
@@ -37,7 +38,7 @@ app.use("/health", (req, res, next) => {
 // 404 HANDLER
 
 app.use(async (req, res, next) => {
-  next(createError.NotFound());
+  next(createHttpError.NotFound());
 });
 
 // ERROR HANDLER
