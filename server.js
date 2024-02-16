@@ -30,6 +30,9 @@ app.use(express.json());
 app.use(morgan("dev"));
 app.use(express.json());
 app.use("/video", videoRoute);
+app.use("/health", (req, res, next) => {
+  res.send();
+});
 
 // 404 HANDLER
 
@@ -59,7 +62,7 @@ app.use((err, req, res, next) => {
   }
 });
 
-const port = process.env.PORT || 4000;
+const port = process.env.PORT || 8080;
 const server = app.listen(port, () => {
   console.log(`App listening on http://localhost:${port}`);
 });
