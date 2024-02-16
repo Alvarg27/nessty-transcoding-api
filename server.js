@@ -31,6 +31,12 @@ app.use(morgan("dev"));
 app.use(express.json());
 app.use("/video", videoRoute);
 
+// 404 HANDLER
+
+app.use(async (req, res, next) => {
+  next(createError.NotFound());
+});
+
 // ERROR HANDLER
 
 app.use((err, req, res, next) => {
