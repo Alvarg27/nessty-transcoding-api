@@ -154,9 +154,13 @@ function getVideoDimensions(buffer) {
 const { Storage, TransferManager } = require("@google-cloud/storage");
 const { v4: uuidv4 } = require("uuid");
 const { exec } = require("child_process");
-const storage = new Storage({
-  keyFilename: "service_key.json",
-});
+const storage = new Storage(
+  process.env.ENVIRONMENT === "DEVELOPMENT"
+    ? {
+        keyFilename: "service_key.json",
+      }
+    : null
+);
 const bucketName = "nessty-files";
 
 const bucket = storage.bucket(bucketName);
