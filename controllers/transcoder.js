@@ -205,8 +205,6 @@ exports.transcoderVideo = async (req, res, next) => {
       });
     }
 
-    const sandbox = await VideoSandbox.find();
-    console.log(sandbox);
     if (!video) {
       throw createHttpError.NotFound("video not found");
     }
@@ -271,6 +269,14 @@ const processVideo = (buffer, fileId, filteredStreams, video) => {
           reject(err);
         });
     }
+
+    // Generating Thumbnail
+    command
+      .output(path.join(uniqueDir, "thumbnail.png"))
+      .frames(1)
+      .noAudio()
+      .seek("00:00:03");
+
     command
       .on("start", async (command) => {
         console.log(command);
