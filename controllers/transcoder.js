@@ -33,83 +33,68 @@ function timeToSeconds(timeString) {
 
 const streams = [
   {
-    bandwidth: "200000",
-    resolution: "256x144",
-    playlistFile: "144p.m3u8",
-    outputOptions: [
-      "-b:v",
-      "150k",
-      "-maxrate",
-      "220k",
-      "-bufsize",
-      "300k",
-      "-b:a",
-      "64k",
-    ],
-  },
-  {
-    bandwidth: "500000",
-    resolution: "426x240",
-    playlistFile: "240.m3u8",
-    outputOptions: [
-      "-b:v",
-      "400k",
-      "-maxrate",
-      "456k",
-      "-bufsize",
-      "600k",
-      "-b:a",
-      "96k",
-    ],
-  },
-  {
-    bandwidth: "800000",
-    resolution: "640x360",
+    bandwidth: "1200000", // Approx 1.2 Mbps
+    resolution: "640x360", // 360p
     playlistFile: "360p.m3u8",
     outputOptions: [
       "-b:v",
-      "800k",
+      "1100k",
       "-maxrate",
-      "856k",
+      "1170k",
       "-bufsize",
-      "1200k",
+      "2340k",
       "-b:a",
       "96k",
     ],
   },
   {
-    bandwidth: "1500000",
-    resolution: "1280x720",
+    bandwidth: "800000", // Approx 0.8 Mbps
+    resolution: "426x240", // 240p
+    playlistFile: "240p.m3u8",
+    outputOptions: [
+      "-b:v",
+      "700k",
+      "-maxrate",
+      "750k",
+      "-bufsize",
+      "1500k",
+      "-b:a",
+      "96k",
+    ],
+  },
+  {
+    bandwidth: "3000000", // Approx 4.5 Mbps
+    resolution: "1280x720", // 720p
     playlistFile: "720p.m3u8",
     outputOptions: [
       "-b:v",
-      "2800k",
+      "4000k",
       "-maxrate",
-      "2996k",
+      "4500k",
       "-bufsize",
-      "4200k",
+      "9000k",
       "-b:a",
       "128k",
     ],
   },
   {
-    bandwidth: "3000000",
-    resolution: "1920x1080",
+    bandwidth: "6000000", // Approx 6 Mbps for 1080p
+    resolution: "1920x1080", // 1080p
     playlistFile: "1080p.m3u8",
     outputOptions: [
       "-b:v",
-      "5000k",
-      "-maxrate",
-      "5350k",
-      "-bufsize",
       "7500k",
+      "-maxrate",
+      "8000k",
+      "-bufsize",
+      "16000k",
       "-b:a",
       "192k",
     ],
   },
   {
-    bandwidth: "6000000",
-    resolution: "2560x1440",
+    bandwidth: "16000000", // Approx 16 Mbps for 1440p
+    resolution: "2560x1440", // 1440p
     playlistFile: "1440p.m3u8",
     outputOptions: [
       "-b:v",
@@ -117,22 +102,22 @@ const streams = [
       "-maxrate",
       "8800k",
       "-bufsize",
-      "13200k",
+      "17600k",
       "-b:a",
       "192k",
     ],
   },
   {
-    bandwidth: "12000000",
-    resolution: "3840x2160",
+    bandwidth: "25000000", // Approx 25 Mbps
+    resolution: "3840x2160", // 4K
     playlistFile: "4k.m3u8",
     outputOptions: [
       "-b:v",
-      "15000k",
+      "15500k",
       "-maxrate",
-      "16500k",
+      "16000k",
       "-bufsize",
-      "24750k",
+      "32000k",
       "-b:a",
       "192k",
     ],
@@ -212,6 +197,7 @@ exports.transcoderVideo = async (req, res, next) => {
       .file(`video/raw/${video.name}.mp4`)
       .download();
 
+    await streamThumbnailToGCP(videoBuffer, video.name);
     const videoMetadata = await getVideoDimensions(videoBuffer);
 
     if (!videoMetadata?.height || videoMetadata?.height < 144) {
@@ -259,10 +245,12 @@ const processVideo = (buffer, fileId, filteredStreams, video) => {
         .autopad()
         .outputOptions([
           ...config.outputOptions,
-          "-hls_time",
-          "10",
           "-hls_list_size",
           "0",
+          "-hls_time",
+          "6",
+          "-r",
+          "30",
         ])
         .on("error", (err) => {
           console.info("error", err);
@@ -325,7 +313,6 @@ const uploadDirToGCS = async (directory, fileId) => {
         console.error("Error reading directory:", err);
         reject(err);
       }
-
       let uploadedFiles = 0;
       files.forEach((file) => {
         const localFilePath = path.join(directory, file);
@@ -375,5 +362,37 @@ const createMasterPlaylist = async (filteredStreams, fileId) => {
       .catch((err) => {
         reject(err);
       });
+  });
+};
+
+/////////////////////////////
+// GENERATE INITIAL THUMBNAIL
+////////////////////////////
+
+const streamThumbnailToGCP = async (buffer, fileId) => {
+  return new Promise((resolve, reject) => {
+    const bucket = storage.bucket("nessty-files");
+    const file = bucket.file(`video/raw/${fileId}.png`);
+    const thumbnailStream = file.createWriteStream();
+
+    ffmpeg({
+      source: Readable.from(buffer, { objectMode: false }),
+      nolog: false,
+    })
+      .setFfmpegPath(ffmpegInstaller.path)
+      .inputFormat("mp4") // or the appropriate format of your video
+      .seek("00:00:03")
+      .outputOptions(["-frames:v 1", `-vf scale=426x240`])
+      .outputFormat("image2pipe")
+      .output(thumbnailStream)
+      .on("end", () => {
+        console.log("Thumbnail streamed to GCP");
+        resolve();
+      })
+      .on("error", (err) => {
+        console.error("Error streaming thumbnail:", err);
+        reject(err);
+      })
+      .run();
   });
 };
