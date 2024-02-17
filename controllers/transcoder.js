@@ -184,22 +184,32 @@ exports.transcoderVideo = async (req, res, next) => {
     }
     const token = bearerToken[1];
 
-    let Video;
     let environment;
     if (token === process.env.PRODUCTION_SECRET) {
       environment = "PRODUCTION";
-      Video = VideoProduction;
     } else if (token === process.env.SANDBOX_SECRET) {
       environment = "DEVELOPMENT";
-      Video = VideoSandbox;
     } else {
       throw createError.Unauthorized();
     }
-
+    console.log(`Running transcoder on ${environment} mode`);
     const { videoId } = req.params;
-    const video = await Video.findOne({
-      _id: videoId,
-    });
+    let video;
+    if (environment === "PRODUCTION") {
+      video = await VideoProduction.findOne({
+        _id: videoId,
+      });
+    } else {
+      video = await VideoSandbox.findOne({
+        _id: videoId,
+      });
+    }
+
+    const sandbox = await VideoSandbox.find();
+    console.log(sandbox);
+    if (!video) {
+      throw createHttpError.NotFound("video not found");
+    }
     const [videoBuffer] = await bucket
       .file(`video/raw/${video.name}.mp4`)
       .download();

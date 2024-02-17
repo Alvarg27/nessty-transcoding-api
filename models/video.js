@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
-const { connection1, connection2 } = require("../helpers/initMongoDb");
 const Schema = mongoose.Schema;
+const { connection1, connection2 } = require("../helpers/initMongoDb");
 
 const VideoSchema = Schema({
   organization: { type: Schema.Types.ObjectId, ref: "organization" },
@@ -29,7 +29,7 @@ const VideoSchema = Schema({
   created: { type: Date },
 });
 
-const VideoSandbox = connection1.model("video", VideoSchema);
-const VideoProduction = connection2.model("video", VideoSchema);
+const VideoProduction = connection1.model("video", VideoSchema);
+const VideoSandbox = connection2.model("video", VideoSchema);
 
 module.exports = { VideoProduction, VideoSandbox };
