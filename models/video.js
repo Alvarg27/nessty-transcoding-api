@@ -1,18 +1,35 @@
 const mongoose = require("mongoose");
+const { connection1, connection2 } = require("../helpers/initMongoDb");
 const Schema = mongoose.Schema;
 
-const SessionTokenSchema = Schema({
-  organization: { type: String },
+const VideoSchema = Schema({
+  organization: { type: Schema.Types.ObjectId, ref: "organization" },
+  name: { type: String },
+  original_filename: { type: String },
+  streams: [{ type: String }],
   status: {
     type: String,
-    enum: ["uploading", "processing", "unpublished", "active"],
+    enum: [
+      "requested",
+      "uploading",
+      "processing",
+      "unpublished",
+      "failed",
+      "active",
+    ],
   },
-  account: { type: Schema.Types.ObjectId, ref: "account" },
+  processing_start: { type: Date },
+  processing_end: { type: Date },
+  upload_start: { type: Date },
+  upload_end: { type: Date },
   upload_progress: { type: Number },
   processing_progress: { type: Number },
+  duration: { type: Number },
   updated: { type: Date },
   created: { type: Date },
 });
 
-const SessionToken = mongoose.model("session_token", SessionTokenSchema);
-module.exports = SessionToken;
+const VideoSandbox = connection1.model("video", VideoSchema);
+const VideoProduction = connection2.model("video", VideoSchema);
+
+module.exports = { VideoProduction, VideoSandbox };

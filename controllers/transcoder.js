@@ -1,14 +1,35 @@
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
 const ffprobeInstaller = require("@ffprobe-installer/ffprobe");
-
+const moment = require("moment");
 const fs = require("fs");
 const path = require("path");
-
 const createHttpError = require("http-errors");
-
 const { Readable } = require("stream");
 const tmpDir = require("os").tmpdir();
+const { Storage } = require("@google-cloud/storage");
+const { v4: uuidv4 } = require("uuid");
+const storage = new Storage({
+  keyFilename: "service_key.json",
+});
+const { VideoProduction, VideoSandbox } = require("../models/video");
+const bucketName = "nessty-files";
+const bucket = storage.bucket(bucketName);
+
+function timeToSeconds(timeString) {
+  // Split the time string by colon and dot
+  const parts = timeString.split(":");
+  const secondsParts = parts[2].split(".");
+
+  // Extract hours, minutes, and seconds
+  const hours = parseInt(parts[0]);
+  const minutes = parseInt(parts[1]);
+  const seconds = parseInt(secondsParts[0]);
+  const milliseconds = parseInt(secondsParts[1]);
+
+  // Convert hours and minutes to seconds and add everything together
+  return hours * 3600 + minutes * 60 + seconds + milliseconds / 100;
+}
 
 const streams = [
   {
@@ -141,6 +162,7 @@ function getVideoDimensions(buffer) {
           resolve({
             width: videoStream.width,
             height: videoStream.height,
+            duration: videoStream.duration,
           });
         } else {
           reject(new Error("No video stream found"));
@@ -149,27 +171,40 @@ function getVideoDimensions(buffer) {
   });
 }
 
-// CLOUD STORAGE
-
-const { Storage, TransferManager } = require("@google-cloud/storage");
-const { v4: uuidv4 } = require("uuid");
-const { exec } = require("child_process");
-const storage = new Storage({
-  keyFilename: "service_key.json",
-});
-const bucketName = "nessty-files";
-
-const bucket = storage.bucket(bucketName);
-
 exports.transcoderVideo = async (req, res, next) => {
   try {
-    if (!req.file) {
-      throw createHttpError.BadRequest("Upload a file to begin transcoding");
+    // RETRIEVE HEADERS
+    if (!req.headers["authorization"]) {
+      throw createHttpError.Unauthorized();
+    }
+    const authHeader = req.headers["authorization"];
+    const bearerToken = authHeader.split(" ");
+    if (bearerToken.length < 2) {
+      throw createHttpError.Unauthorized();
+    }
+    const token = bearerToken[1];
+
+    let Video;
+    let environment;
+    if (token === process.env.PRODUCTION_SECRET) {
+      environment = "PRODUCTION";
+      Video = VideoProduction;
+    } else if (token === process.env.SANDBOX_SECRET) {
+      environment = "DEVELOPMENT";
+      Video = VideoSandbox;
+    } else {
+      throw createError.Unauthorized();
     }
 
-    const fileId = uuidv4();
+    const { videoId } = req.params;
+    const video = await Video.findOne({
+      _id: videoId,
+    });
+    const [videoBuffer] = await bucket
+      .file(`video/raw/${video.name}.mp4`)
+      .download();
 
-    const videoMetadata = await getVideoDimensions(req.file.buffer);
+    const videoMetadata = await getVideoDimensions(videoBuffer);
 
     if (!videoMetadata?.height || videoMetadata?.height < 144) {
       throw createHttpError.BadRequest("Minimum height for a video is 144p");
@@ -178,16 +213,17 @@ exports.transcoderVideo = async (req, res, next) => {
       throw createHttpError.BadRequest("Minimum width for a video is 144p");
     }
 
+    await video.updateOne({
+      duration: videoMetadata.duration,
+    });
+
     // FILTER STREAMS BY ORIGINAL VIDEO RESOLUTION
     const filteredStreams = streams.filter(
       (x) => videoMetadata.height >= x?.resolution?.split("x")[1]
     );
 
-    await processVideo(req.file.buffer, fileId, filteredStreams);
-
-    await createMasterPlaylist(filteredStreams, fileId);
-
-    res.send(fileId);
+    await processVideo(videoBuffer, video.name, filteredStreams, video);
+    res.send();
   } catch (error) {
     console.log(`Transcoding failed: `, error);
     next(error);
@@ -197,7 +233,7 @@ exports.transcoderVideo = async (req, res, next) => {
 // PROCESS FILE
 ////////////////////////////
 
-const processVideo = (buffer, fileId, filteredStreams) => {
+const processVideo = (buffer, fileId, filteredStreams, video) => {
   return new Promise((resolve, reject) => {
     const uniqueDir = path.join(tmpDir, uuidv4());
     fs.mkdirSync(uniqueDir);
@@ -212,6 +248,7 @@ const processVideo = (buffer, fileId, filteredStreams) => {
         .videoCodec("libx264")
         .audioCodec("aac")
         .size(`${config.resolution}`)
+        .autopad()
         .outputOptions([...config.outputOptions])
         .on("error", (err) => {
           console.info("error", err);
@@ -219,18 +256,35 @@ const processVideo = (buffer, fileId, filteredStreams) => {
         });
     }
     command
-      .on("progress", (progress) => {
-        console.info("progress", progress);
+      .on("start", async () => {
+        await video.updateOne({
+          status: "processing",
+          processing_start: moment.utc().toDate(),
+          updated: moment.utc().toDate(),
+        });
+        resolve();
+      })
+      .on("progress", async (progress) => {
+        await video.updateOne({
+          status: "processing",
+          processing_progress: timeToSeconds(progress.timemark),
+          updated: moment.utc().toDate(),
+        });
       })
       .on("end", async () => {
         console.log(`Processing complete`);
+        await video.updateOne({
+          status: "unpublished",
+          processing_end: moment.utc().toDate(),
+          updated: moment.utc().toDate(),
+        });
         //////////////////////////////
         // UPLOAD TO GOOGLE CLOUD
         //////////////////////////////
-
+        await createMasterPlaylist(filteredStreams, fileId);
         await uploadDirToGCS(uniqueDir, fileId);
+        console.log("[OK] Files successfully uploaded");
         fs.rmSync(uniqueDir, { recursive: true, force: true });
-        resolve();
       });
     command.run();
   });
@@ -257,10 +311,8 @@ const uploadDirToGCS = async (directory, fileId) => {
         bucket
           .upload(localFilePath, { destination: remoteFilePath })
           .then(() => {
-            console.log(`Uploaded ${file} to ${remoteFilePath}`);
             uploadedFiles++;
             if (uploadedFiles === files.length) {
-              console.log("All files uploaded");
               resolve();
             }
           })
