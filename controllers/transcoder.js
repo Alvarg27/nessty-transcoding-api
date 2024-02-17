@@ -33,18 +33,18 @@ function timeToSeconds(timeString) {
 
 const streams = [
   {
-    bandwidth: "1200000", // Approx 1.2 Mbps
-    resolution: "640x360", // 360p
-    playlistFile: "360p.m3u8",
+    bandwidth: "3000000", // Approx 4.5 Mbps
+    resolution: "1280x720", // 720p
+    playlistFile: "720p.m3u8",
     outputOptions: [
       "-b:v",
-      "1100k",
+      "4000k",
       "-maxrate",
-      "1170k",
+      "4500k",
       "-bufsize",
-      "2340k",
+      "9000k",
       "-b:a",
-      "96k",
+      "128k",
     ],
   },
   {
@@ -63,18 +63,18 @@ const streams = [
     ],
   },
   {
-    bandwidth: "3000000", // Approx 4.5 Mbps
-    resolution: "1280x720", // 720p
-    playlistFile: "720p.m3u8",
+    bandwidth: "1200000", // Approx 1.2 Mbps
+    resolution: "640x360", // 360p
+    playlistFile: "360p.m3u8",
     outputOptions: [
       "-b:v",
-      "4000k",
+      "1100k",
       "-maxrate",
-      "4500k",
+      "1170k",
       "-bufsize",
-      "9000k",
+      "2340k",
       "-b:a",
-      "128k",
+      "96k",
     ],
   },
   {
