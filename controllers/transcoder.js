@@ -259,14 +259,21 @@ const processVideo = (buffer, fileId, filteredStreams, video) => {
         .audioCodec("aac")
         .size(`${config.resolution}`)
         .autopad()
-        .outputOptions([...config.outputOptions])
+        .outputOptions([
+          ...config.outputOptions,
+          "-hls_time",
+          "10",
+          "-hls_list_size",
+          "0",
+        ])
         .on("error", (err) => {
           console.info("error", err);
           reject(err);
         });
     }
     command
-      .on("start", async () => {
+      .on("start", async (command) => {
+        console.log(command);
         await video.updateOne({
           status: "processing",
           processing_start: moment.utc().toDate(),
