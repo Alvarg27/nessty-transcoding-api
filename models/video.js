@@ -12,11 +12,26 @@ const VideoSchema = Schema({
     enum: [
       "requested",
       "uploading",
+      "pending_processing",
       "processing",
-      "unpublished",
+      "complete",
       "failed",
-      "active",
     ],
+  },
+  publishing_status: {
+    type: String,
+    enum: ["draft", "published"],
+  },
+  signed_url_data: {
+    url: { type: String },
+    fields: {
+      key: { type: String },
+      "x-goog-date": { type: String },
+      "x-goog-credential": { type: String },
+      "x-goog-algorithm": { type: String },
+      policy: { type: String },
+      "x-goog-signature": { type: String },
+    },
   },
   processing_start: { type: Date },
   processing_end: { type: Date },
@@ -27,6 +42,7 @@ const VideoSchema = Schema({
   duration: { type: Number },
   updated: { type: Date },
   created: { type: Date },
+  object: { type: String, enum: ["video"], default: "video" },
 });
 
 const VideoProduction = connection1.model("video", VideoSchema);

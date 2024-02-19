@@ -287,7 +287,7 @@ const processVideo = (buffer, fileId, filteredStreams, video) => {
       .on("end", async () => {
         console.log(`Processing complete`);
         await video.updateOne({
-          status: "unpublished",
+          status: "complete",
           processing_end: moment.utc().toDate(),
           updated: moment.utc().toDate(),
         });
