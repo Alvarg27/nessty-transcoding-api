@@ -248,10 +248,6 @@ const processVideo = (buffer, fileId, filteredStreams, video) => {
         .autopad()
         .outputOptions([
           ...config.outputOptions,
-          "-hwaccel",
-          "cuda", // Using CUDA for hardware acceleration
-          "-hwaccel_output_format",
-          "cuda", // Specify output format for CUDA hardware acceleration
           "-hls_list_size",
           "0",
           "-hls_time",
