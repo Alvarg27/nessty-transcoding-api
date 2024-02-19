@@ -106,5 +106,6 @@ service_key.json
 
 .starting_script.bash
 starting_script.bash
+gpu_acelerated_script.bash
 
 app.yaml
