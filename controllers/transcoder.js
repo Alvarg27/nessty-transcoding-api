@@ -194,11 +194,6 @@ exports.transcoderVideo = async (req, res, next) => {
       throw createHttpError.NotFound("video not found");
     }
 
-    await video.updateOne({
-      duration: videoMetadata.duration,
-      status: "processing_pending",
-    });
-
     const [videoBuffer] = await bucket
       .file(`video/raw/${video.name}.mp4`)
       .download();
@@ -217,6 +212,12 @@ exports.transcoderVideo = async (req, res, next) => {
     const filteredStreams = streams.filter(
       (x) => videoMetadata.height >= x?.resolution?.split("x")[1]
     );
+
+    await video.updateOne({
+      duration: videoMetadata.duration,
+      status: "processing_pending",
+      streams: filteredStreams.map((x) => x.resolution),
+    });
 
     await processVideo(videoBuffer, video.name, filteredStreams, video);
     res.send();
