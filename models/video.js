@@ -8,6 +8,7 @@ const VideoSchema = Schema({
   title: { type: String },
   description: { type: String },
   streams: [{ type: String }],
+  type: { type: String },
   input_dimensions: {
     height: { type: Number },
     width: { type: Number },

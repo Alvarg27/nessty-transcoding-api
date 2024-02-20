@@ -197,8 +197,21 @@ exports.transcoderVideo = async (req, res, next) => {
       throw createHttpError.NotFound("video not found");
     }
 
+    const handleExtension = (mimetype) => {
+      if (mimetype === "video/mp4") {
+        return "mp4";
+      } else if (mimetype === "video/quicktime") {
+        return "mov";
+      } else {
+        throw createHttpError.BadRequest(
+          "Only .mp4 and .mov videos are accepted"
+        );
+      }
+    };
+    const extension = handleExtension(video?.type);
+
     const [videoBuffer] = await bucket
-      .file(`video/raw/${video.name}.mp4`)
+      .file(`video/raw/${video.name}.${extension}`)
       .download();
 
     await streamThumbnailToGCP(videoBuffer, video.name);
