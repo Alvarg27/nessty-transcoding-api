@@ -8,10 +8,13 @@ const VideoSchema = Schema({
   title: { type: String },
   description: { type: String },
   streams: [{ type: String }],
-  original_dimension: {
+  input_dimensions: {
     height: { type: Number },
     width: { type: Number },
   },
+  input_bitrate: { type: Number },
+  input_codec: { type: String },
+  input_avg_frame_rate: { type: String },
   status: {
     type: String,
     enum: [
@@ -41,8 +44,6 @@ const VideoSchema = Schema({
   },
   processing_start: { type: Date },
   processing_end: { type: Date },
-  upload_start: { type: Date },
-  upload_end: { type: Date },
   upload_progress: { type: Number },
   processing_progress: { type: Number },
   duration: { type: Number },

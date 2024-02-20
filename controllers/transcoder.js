@@ -148,6 +148,9 @@ function getVideoDimensions(buffer) {
             width: videoStream.width,
             height: videoStream.height,
             duration: videoStream.duration,
+            bitrate: videoStream.bit_rate,
+            codec: videoStream.codec_name,
+            avg_frame_rate: videoStream.avg_frame_rate,
           });
         } else {
           reject(new Error("No video stream found"));
@@ -217,10 +220,13 @@ exports.transcoderVideo = async (req, res, next) => {
       duration: videoMetadata.duration,
       status: "pending_processing",
       streams: filteredStreams.map((x) => x.resolution),
-      original_dimension: {
+      input_dimensions: {
         height: videoMetadata.height,
         width: videoMetadata.width,
       },
+      input_bitrate: videoMetadata.bit_rate,
+      input_codec: videoMetadata.codec,
+      input_avg_frame_rate: videoMetadata.avg_frame_rate,
     });
 
     await processVideo(videoBuffer, video.name, filteredStreams, video);
@@ -261,7 +267,11 @@ const processVideo = (buffer, fileId, filteredStreams, video) => {
         ])
         .on("error", (err) => {
           console.info("error", err);
-          reject(err);
+          video.updateOne({
+            status: "failed",
+            processing_end: moment.utc().toDate(),
+            updated: moment.utc().toDate(),
+          });
         });
     }
 
