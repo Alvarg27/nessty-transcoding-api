@@ -215,8 +215,12 @@ exports.transcoderVideo = async (req, res, next) => {
 
     await video.updateOne({
       duration: videoMetadata.duration,
-      status: "processing_pending",
+      status: "pending_processing",
       streams: filteredStreams.map((x) => x.resolution),
+      original_dimension: {
+        height: videoMetadata.height,
+        width: videoMetadata.width,
+      },
     });
 
     await processVideo(videoBuffer, video.name, filteredStreams, video);
