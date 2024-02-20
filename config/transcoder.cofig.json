@@ -1,8 +1,0 @@
-{
-  "HLS_SEGMENT_DURATION": 10,
-  "HSL_LIST_SIZE": 0,
-  "CODEC": {
-    "AUDIO": "aac",
-    "VIDEO": "h264"
-  }
-}
