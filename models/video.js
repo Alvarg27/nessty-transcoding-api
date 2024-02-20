@@ -5,8 +5,13 @@ const { connection1, connection2 } = require("../helpers/initMongoDb");
 const VideoSchema = Schema({
   organization: { type: Schema.Types.ObjectId, ref: "organization" },
   name: { type: String },
-  original_filename: { type: String },
+  title: { type: String },
+  description: { type: String },
   streams: [{ type: String }],
+  original_dimension: {
+    height: { type: Number },
+    width: { type: Number },
+  },
   status: {
     type: String,
     enum: [
@@ -21,6 +26,7 @@ const VideoSchema = Schema({
   publishing_status: {
     type: String,
     enum: ["draft", "published"],
+    default: "draft",
   },
   signed_url_data: {
     url: { type: String },
