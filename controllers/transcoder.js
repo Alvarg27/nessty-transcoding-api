@@ -249,6 +249,7 @@ exports.transcoderVideo = async (req, res, next) => {
       video.name,
       filteredStreams,
       video,
+
       environment
     );
     res.send();
@@ -345,12 +346,20 @@ const processVideo = (buffer, fileId, filteredStreams, video, environment) => {
         //////////////////////////////
         // UPLOAD TO GOOGLE CLOUD
         //////////////////////////////
-        await createMasterPlaylist(filteredStreams, fileId);
+        await createMasterPlaylist(filteredStreams, fileId, uniqueDir);
         await uploadDirToGCS(uniqueDir, fileId);
-        console.log("[OK] Files successfully uploaded");
+        // REMOVE LOCAL DIRECTORY
         fs.rmSync(uniqueDir, { recursive: true, force: true });
+        // REMOVE RAW FILES
+        await bucket.deleteFiles({
+          prefix: `video/raw/${video.name}.mp4`,
+        });
+        await bucket.deleteFiles({
+          prefix: `video/raw/${video.name}.png`,
+        });
+        console.log("[OK] Files successfully uploaded");
       })
-      .on("error", (err) => {
+      .on("error", async (err) => {
         if (!canceled) {
           console.info("error", err);
           video.updateOne({
@@ -359,6 +368,18 @@ const processVideo = (buffer, fileId, filteredStreams, video, environment) => {
             updated: moment.utc().toDate(),
           });
         }
+        // REMOVE LOCAL DIRECTORY
+        fs.rmSync(uniqueDir, { recursive: true, force: true });
+        // REMOVE FILES FROM CLOUD STORAGE
+        await bucket.deleteFiles({
+          prefix: `video/transcoded/${video.name}`,
+        });
+        await bucket.deleteFiles({
+          prefix: `video/raw/${video.name}.mp4`,
+        });
+        await bucket.deleteFiles({
+          prefix: `video/raw/${video.name}.png`,
+        });
       });
 
     command.run();
@@ -371,7 +392,6 @@ const processVideo = (buffer, fileId, filteredStreams, video, environment) => {
 
 const uploadDirToGCS = async (directory, fileId) => {
   return new Promise((resolve, reject) => {
-    const bucket = storage.bucket("nessty-files");
     fs.readdir(directory, (err, files) => {
       if (err) {
         console.error("Error reading directory:", err);
@@ -402,10 +422,8 @@ const uploadDirToGCS = async (directory, fileId) => {
 // GENERATE THE HLS MASTER
 ////////////////////////////
 
-const createMasterPlaylist = async (filteredStreams, fileId) => {
+const createMasterPlaylist = async (filteredStreams, fileId, uniqueDir) => {
   return new Promise((resolve, reject) => {
-    const uniqueDir = path.join(tmpDir, uuidv4());
-    fs.mkdirSync(uniqueDir);
     let masterPlaylistContent = "#EXTM3U\n";
 
     filteredStreams.forEach((stream) => {
@@ -435,7 +453,6 @@ const createMasterPlaylist = async (filteredStreams, fileId) => {
 
 const streamThumbnailToGCP = async (buffer, fileId) => {
   return new Promise((resolve, reject) => {
-    const bucket = storage.bucket("nessty-files");
     const file = bucket.file(`video/raw/${fileId}.png`);
     const thumbnailStream = file.createWriteStream();
 
