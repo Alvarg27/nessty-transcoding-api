@@ -337,12 +337,6 @@ const processVideo = (buffer, fileId, filteredStreams, video, environment) => {
         });
       })
       .on("end", async () => {
-        console.log(`Processing complete`);
-        await video.updateOne({
-          status: "complete",
-          processing_end: moment.utc().toDate(),
-          updated: moment.utc().toDate(),
-        });
         //////////////////////////////
         // UPLOAD TO GOOGLE CLOUD
         //////////////////////////////
@@ -356,6 +350,12 @@ const processVideo = (buffer, fileId, filteredStreams, video, environment) => {
         });
         await bucket.deleteFiles({
           prefix: `video/raw/${video.name}.png`,
+        });
+        console.log(`Processing complete`);
+        await video.updateOne({
+          status: "complete",
+          processing_end: moment.utc().toDate(),
+          updated: moment.utc().toDate(),
         });
         console.log("[OK] Files successfully uploaded");
       })
