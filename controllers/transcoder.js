@@ -306,7 +306,7 @@ const processVideo = (buffer, fileId, filteredStreams, video, environment) => {
           "-hls_list_size",
           "0",
           "-hls_time",
-          "6",
+          "2",
           "-r",
           "30",
         ]);
