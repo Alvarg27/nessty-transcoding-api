@@ -307,8 +307,12 @@ const processVideo = (buffer, fileId, filteredStreams, video, environment) => {
           "0",
           "-hls_time",
           "2",
-          "-r",
-          "30",
+          "-r", // Set frame rate
+          "30", // Assuming 30 fps
+          "-force_key_frames", // Force keyframes at specified intervals
+          "expr:gte(t,n_forced*2)", // Force a keyframe every 2 seconds
+          "-sc_threshold",
+          "0", // Disable scene cut detection
         ]);
     }
 
