@@ -33,91 +33,91 @@ function timeToSeconds(timeString) {
 
 const streams = [
   {
-    bandwidth: "1200000", // Approx 1.2 Mbps
-    resolution: "640x360", // 360p
-    playlistFile: "360p.m3u8",
-    outputOptions: [
-      "-b:v",
-      "1100k",
-      "-maxrate",
-      "1170k",
-      "-bufsize",
-      "2340k",
-      "-b:a",
-      "96k",
-    ],
-  },
-  {
-    bandwidth: "800000", // Approx 0.8 Mbps
+    bandwidth: "500000", // 240p
     resolution: "426x240", // 240p
     playlistFile: "240p.m3u8",
     outputOptions: [
       "-b:v",
-      "700k",
+      "400k",
       "-maxrate",
-      "750k",
+      "500k",
       "-bufsize",
-      "1500k",
+      "1000k",
+      "-b:a",
+      "64k",
+    ],
+  },
+  {
+    bandwidth: "1000000", // 360p
+    resolution: "640x360", // 360p
+    playlistFile: "360p.m3u8",
+    outputOptions: [
+      "-b:v",
+      "800k",
+      "-maxrate",
+      "1000k",
+      "-bufsize",
+      "2000k",
       "-b:a",
       "96k",
     ],
   },
   {
-    bandwidth: "3000000", // Approx 4.5 Mbps
+    bandwidth: "3000000", // 720p
     resolution: "1280x720", // 720p
     playlistFile: "720p.m3u8",
     outputOptions: [
       "-b:v",
-      "4000k",
+      "2500k",
       "-maxrate",
-      "4500k",
+      "3000k",
       "-bufsize",
-      "9000k",
+      "6000k",
       "-b:a",
       "128k",
     ],
   },
   {
-    bandwidth: "6000000", // Approx 6 Mbps for 1080p
+    bandwidth: "6000000", // 1080p
     resolution: "1920x1080", // 1080p
     playlistFile: "1080p.m3u8",
     outputOptions: [
       "-b:v",
-      "7500k",
+      "5000k",
       "-maxrate",
-      "8000k",
+      "6000k",
       "-bufsize",
-      "16000k",
+      "12000k",
       "-b:a",
       "192k",
     ],
   },
   {
-    bandwidth: "16000000", // Approx 16 Mbps for 1440p
+    bandwidth: "12000000", // 1440p
     resolution: "2560x1440", // 1440p
     playlistFile: "1440p.m3u8",
     outputOptions: [
       "-b:v",
-      "8000k",
+      "10000k",
       "-maxrate",
-      "8800k",
+      "12000k",
       "-bufsize",
-      "17600k",
+      "24000k",
       "-b:a",
       "192k",
     ],
   },
   {
-    bandwidth: "25000000", // Approx 25 Mbps
+    bandwidth: "30000000", // 4K
     resolution: "3840x2160", // 4K
     playlistFile: "4k.m3u8",
     outputOptions: [
       "-b:v",
-      "15500k",
+      "25000k",
       "-maxrate",
-      "16000k",
+      "30000k",
       "-bufsize",
-      "32000k",
+      "60000k",
       "-b:a",
       "192k",
     ],
