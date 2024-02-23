@@ -196,7 +196,9 @@ exports.transcoderVideo = async (req, res, next) => {
     if (!video) {
       throw createHttpError.NotFound("video not found");
     }
-
+    if (video?.status?.canceled) {
+      throw createHttpError.NotFound("video not found");
+    }
     const handleExtension = (mimetype) => {
       if (mimetype === "video/mp4") {
         return "mp4";
@@ -242,7 +244,13 @@ exports.transcoderVideo = async (req, res, next) => {
       input_avg_frame_rate: videoMetadata.avg_frame_rate,
     });
 
-    await processVideo(videoBuffer, video.name, filteredStreams, video);
+    await processVideo(
+      videoBuffer,
+      video.name,
+      filteredStreams,
+      video,
+      environment
+    );
     res.send();
   } catch (error) {
     console.log(`Transcoding failed: `, error);
@@ -253,14 +261,37 @@ exports.transcoderVideo = async (req, res, next) => {
 // PROCESS FILE
 ////////////////////////////
 
-const processVideo = (buffer, fileId, filteredStreams, video) => {
+const processVideo = (buffer, fileId, filteredStreams, video, environment) => {
   return new Promise((resolve, reject) => {
     const uniqueDir = path.join(tmpDir, uuidv4());
     fs.mkdirSync(uniqueDir);
+
     const command = ffmpeg({
       source: Readable.from(buffer, { objectMode: false }),
       nolog: false,
     }).setFfmpegPath(ffmpegInstaller.path);
+
+    // CANCELATION INTERVAL
+    let canceled = false;
+    let intervalId = setInterval(async () => {
+      let currentVideo;
+      if (environment === "PRODUCTION") {
+        currentVideo = await VideoProduction.findOne({
+          _id: video?._id,
+        });
+      } else {
+        currentVideo = await VideoSandbox.findOne({
+          _id: video?._id,
+        });
+      }
+      if (!currentVideo || currentVideo?.status === "canceled") {
+        command.kill("SIGTERM"); // or just command.kill() for default SIGKILL
+        clearInterval(intervalId);
+        console.log("FFmpeg process terminated due to video cancellation");
+        canceled = true;
+      }
+    }, 2000); // Check every 5 seconds
+
     for (let i = 0; i < filteredStreams.length; i++) {
       const config = filteredStreams[i];
       command
@@ -277,15 +308,7 @@ const processVideo = (buffer, fileId, filteredStreams, video) => {
           "6",
           "-r",
           "30",
-        ])
-        .on("error", (err) => {
-          console.info("error", err);
-          video.updateOne({
-            status: "failed",
-            processing_end: moment.utc().toDate(),
-            updated: moment.utc().toDate(),
-          });
-        });
+        ]);
     }
 
     // Generating Thumbnail
@@ -326,7 +349,18 @@ const processVideo = (buffer, fileId, filteredStreams, video) => {
         await uploadDirToGCS(uniqueDir, fileId);
         console.log("[OK] Files successfully uploaded");
         fs.rmSync(uniqueDir, { recursive: true, force: true });
+      })
+      .on("error", (err) => {
+        if (!canceled) {
+          console.info("error", err);
+          video.updateOne({
+            status: "failed",
+            processing_end: moment.utc().toDate(),
+            updated: moment.utc().toDate(),
+          });
+        }
       });
+
     command.run();
   });
 };
