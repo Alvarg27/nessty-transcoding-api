@@ -6,8 +6,6 @@ require("./helpers/initMongoDb");
 const videoRoute = require("./routes/video");
 const createHttpError = require("http-errors");
 const app = express();
-const socketIo = require("socket.io");
-const processLiveStream = require("./helpers/processLiveStream");
 
 // RATE LIMITER
 //const limiter = rateLimit({

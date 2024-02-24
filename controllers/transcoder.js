@@ -230,11 +230,16 @@ exports.transcoderVideo = async (req, res, next) => {
       (x) => videoMetadata.height >= x?.resolution?.split("x")[1]
     );
 
+    // EXTRACT ASPECT RATIO
+
+    const aspectRatio = videoMetadata?.width / videoMetadata?.height;
+
+    // UPDATE VIDEO
     await video.updateOne({
       duration: videoMetadata.duration,
       status: "pending_processing",
       streams: filteredStreams.map((x) => x.resolution),
-      aspect_ratio: videoMetadata?.width / videoMetadata?.height,
+      aspect_ratio: aspectRatio,
       input_dimensions: {
         height: videoMetadata.height,
         width: videoMetadata.width,
@@ -250,7 +255,8 @@ exports.transcoderVideo = async (req, res, next) => {
       video.name,
       filteredStreams,
       video,
-      environment
+      environment,
+      aspectRatio
     );
     res.send();
   } catch (error) {
@@ -262,7 +268,14 @@ exports.transcoderVideo = async (req, res, next) => {
 // PROCESS FILE
 ////////////////////////////
 
-const processVideo = (buffer, fileId, filteredStreams, video, environment) => {
+const processVideo = (
+  buffer,
+  fileId,
+  filteredStreams,
+  video,
+  environment,
+  aspectRatio
+) => {
   return new Promise((resolve, reject) => {
     const uniqueDir = path.join(tmpDir, uuidv4());
     fs.mkdirSync(uniqueDir);
@@ -296,7 +309,7 @@ const processVideo = (buffer, fileId, filteredStreams, video, environment) => {
     for (let i = 0; i < filteredStreams.length; i++) {
       const config = filteredStreams[i];
       const targetHeight = parseInt(config.resolution.split("x")[1]);
-      const targetWidth = Math.round(targetHeight * video?.aspect_ratio);
+      const targetWidth = Math.round(targetHeight * aspectRatio);
 
       command
         .output(path.join(uniqueDir, config.playlistFile))
