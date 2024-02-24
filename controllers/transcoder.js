@@ -26,7 +26,6 @@ function timeToSeconds(timeString) {
   const minutes = parseInt(parts[1]);
   const seconds = parseInt(secondsParts[0]);
   const milliseconds = parseInt(secondsParts[1]);
-
   // Convert hours and minutes to seconds and add everything together
   return hours * 3600 + minutes * 60 + seconds + milliseconds / 100;
 }
@@ -235,10 +234,12 @@ exports.transcoderVideo = async (req, res, next) => {
       duration: videoMetadata.duration,
       status: "pending_processing",
       streams: filteredStreams.map((x) => x.resolution),
+      aspect_ratio: videoMetadata?.width / videoMetadata?.height,
       input_dimensions: {
         height: videoMetadata.height,
         width: videoMetadata.width,
       },
+
       input_bitrate: videoMetadata.bit_rate,
       input_codec: videoMetadata.codec,
       input_avg_frame_rate: videoMetadata.avg_frame_rate,
@@ -249,7 +250,6 @@ exports.transcoderVideo = async (req, res, next) => {
       video.name,
       filteredStreams,
       video,
-
       environment
     );
     res.send();
@@ -295,11 +295,14 @@ const processVideo = (buffer, fileId, filteredStreams, video, environment) => {
 
     for (let i = 0; i < filteredStreams.length; i++) {
       const config = filteredStreams[i];
+      const targetHeight = parseInt(config.resolution.split("x")[1]);
+      const targetWidth = Math.round(targetHeight * video?.aspect_ratio);
+
       command
         .output(path.join(uniqueDir, config.playlistFile))
         .videoCodec("libx264")
         .audioCodec("aac")
-        .size(`${config.resolution}`)
+        .size(`${targetWidth}x${targetHeight}`) // Set new resolution
         .autopad()
         .outputOptions([
           ...config.outputOptions,

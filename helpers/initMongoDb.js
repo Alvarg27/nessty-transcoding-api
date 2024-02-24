@@ -5,10 +5,7 @@ const mongoose = require("mongoose");
 const dbURI1 = process.env.PRODUCTION_MONGO_URI;
 const dbURI2 = process.env.SANDBOX_MONGO_URI;
 // Create separate connections
-const connection1 = mongoose.createConnection(dbURI1, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+const connection1 = mongoose.createConnection(dbURI1);
 
 connection1.on(
   "error",
@@ -18,10 +15,7 @@ connection1.once("open", () => {
   console.log("[PRODUCTION] Mongo DB connected");
 });
 
-const connection2 = mongoose.createConnection(dbURI2, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+const connection2 = mongoose.createConnection(dbURI2);
 connection2.on(
   "error",
   console.error.bind(console, "[SANDBOX] Mongo DB error: ")

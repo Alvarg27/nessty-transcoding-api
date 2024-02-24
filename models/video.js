@@ -13,6 +13,7 @@ const VideoSchema = Schema({
     height: { type: Number },
     width: { type: Number },
   },
+  aspect_ratio: { type: Number },
   input_bitrate: { type: Number },
   input_codec: { type: String },
   input_avg_frame_rate: { type: String },
