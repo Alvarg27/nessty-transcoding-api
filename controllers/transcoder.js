@@ -12,6 +12,10 @@ const { v4: uuidv4 } = require("uuid");
 const storage = new Storage({
   keyFilename: "service_key.json",
 });
+const maxConcurrentUploads = 5;
+const { promisify } = require("util");
+const readdir = promisify(fs.readdir);
+const pipeline = promisify(require("stream").pipeline);
 const { VideoProduction, VideoSandbox } = require("../models/video");
 const bucketName = "nessty-files";
 const bucket = storage.bucket(bucketName);
@@ -372,7 +376,7 @@ const processVideo = (
         // UPLOAD TO GOOGLE CLOUD
         //////////////////////////////
         await createMasterPlaylist(filteredStreams, fileId, uniqueDir);
-        await uploadDirToGCS(uniqueDir, fileId, video);
+        await uploadDirToGCS(uniqueDir, fileId, video, uniqueDir);
         // REMOVE LOCAL DIRECTORY
         fs.rmSync(uniqueDir, { recursive: true, force: true });
         // REMOVE RAW FILES
@@ -418,53 +422,109 @@ const processVideo = (
 };
 
 /////////////////////////////
+// UPLOAD FILE WITH RETRY LOGIC
+////////////////////////////
+async function uploadFileWithRetry(
+  localFilePath,
+  remoteFilePath,
+  maxRetries = 5
+) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await pipeline(
+        fs.createReadStream(localFilePath),
+        bucket.file(remoteFilePath).createWriteStream({
+          resumable: true,
+          validation: "crc32c",
+        })
+      );
+      console.log(
+        `Upload successful: ${localFilePath} to ${remoteFilePath} (Attempt ${attempt})`
+      );
+      return;
+    } catch (err) {
+      console.error(
+        `Attempt ${attempt} failed to upload ${localFilePath}: ${err}`
+      );
+      if (attempt === maxRetries)
+        throw new Error(
+          `Failed to upload ${localFilePath} after ${maxRetries} attempts`
+        );
+    }
+  }
+}
+
+/////////////////////////////
+// PROCESS UPLOAD QUEUE
+////////////////////////////
+async function processUploadQueue(files, directory, fileId) {
+  const uploadTasks = [];
+
+  for (const file of files) {
+    const localFilePath = path.join(directory, file);
+    const remoteFilePath = `video/transcoded/${fileId}/${file}`;
+
+    // Create a task for each file
+    const task = async () => {
+      try {
+        await uploadFileWithRetry(localFilePath, remoteFilePath);
+      } catch (err) {
+        throw new Error(`Failed to upload ${file}: ${err.message}`);
+      }
+    };
+
+    uploadTasks.push(task);
+  }
+
+  // Function to manage concurrent uploads
+  const manageConcurrency = async (tasks, maxConcurrent) => {
+    const executing = new Set();
+    const results = [];
+
+    for (const task of tasks) {
+      const executeTask = task().then(() => executing.delete(executeTask));
+      executing.add(executeTask);
+
+      if (executing.size >= maxConcurrent) {
+        await Promise.race(executing);
+      }
+
+      results.push(executeTask);
+    }
+
+    await Promise.all(results);
+  };
+
+  await manageConcurrency(uploadTasks, maxConcurrentUploads);
+}
+/////////////////////////////
 // UPLOAD DIR TO GOOGLE CLOUD
 ////////////////////////////
 
-const uploadDirToGCS = async (directory, fileId, video) => {
-  return new Promise((resolve, reject) => {
-    fs.readdir(directory, (err, files) => {
-      if (err) {
-        console.error("Error reading directory:", err);
-        reject(err);
-      }
-      let uploadedFiles = 0;
-      files.forEach((file) => {
-        const localFilePath = path.join(directory, file);
-        const remoteFilePath = `video/transcoded/${fileId}/${file}`;
-
-        bucket
-          .upload(localFilePath, { destination: remoteFilePath })
-          .then(() => {
-            uploadedFiles++;
-            if (uploadedFiles === files.length) {
-              resolve();
-            }
-          })
-          .catch(async (err) => {
-            console.info("error", err);
-            video.updateOne({
-              status: "failed",
-              processing_end: moment.utc().toDate(),
-              updated: moment.utc().toDate(),
-            });
-
-            // REMOVE LOCAL DIRECTORY
-            fs.rmSync(uniqueDir, { recursive: true, force: true });
-            // REMOVE FILES FROM CLOUD STORAGE
-            await bucket.deleteFiles({
-              prefix: `video/transcoded/${video.name}`,
-            });
-            await bucket.deleteFiles({
-              prefix: `video/raw/${video.name}.mp4`,
-            });
-            await bucket.deleteFiles({
-              prefix: `video/raw/${video.name}.png`,
-            });
-          });
-      });
+const uploadDirToGCS = async (directory, fileId, video, uniqueDir) => {
+  try {
+    const files = await readdir(directory);
+    await processUploadQueue(files, directory, fileId);
+    console.log("All files in the directory have been uploaded.");
+  } catch (err) {
+    console.error("Error uploading directory:", err);
+    video.updateOne({
+      status: "failed",
+      processing_end: moment.utc().toDate(),
+      updated: moment.utc().toDate(),
     });
-  });
+    // REMOVE LOCAL DIRECTORY
+    fs.rmSync(uniqueDir, { recursive: true, force: true });
+    // REMOVE FILES FROM CLOUD STORAGE
+    const prefixes = [
+      `video/transcoded/${video.name}`,
+      `video/raw/${video.name}.mp4`,
+      `video/raw/${video.name}.png`,
+    ];
+    for (const prefix of prefixes) {
+      await bucket.deleteFiles({ prefix });
+    }
+  }
 };
 
 /////////////////////////////
@@ -574,21 +634,21 @@ const extractAudioAndUpload = async (buffer, fileId) => {
 ///////////////////////////////////
 
 async function transcribeAudio(fileId, environment) {
-  const request = {
-    config: {
-      languageCode: "es-MX",
-      encoding: "LINEAR16",
-      sampleRateHertz: 16000,
-      enableAutomaticPunctuation: true,
-      enableWordTimeOffsets: true, // Enable word-level time offsets
-      alternativeLanguageCodes: ["es-MX", "en-US"],
-      model: "latest_long",
-    },
-    audio: {
-      uri: `gs://nessty-files/video/transcoded/${fileId}/audio.wav`,
-    },
-  };
   try {
+    const request = {
+      config: {
+        languageCode: "es-MX",
+        encoding: "LINEAR16",
+        sampleRateHertz: 16000,
+        enableAutomaticPunctuation: true,
+        enableWordTimeOffsets: true, // Enable word-level time offsets
+        alternativeLanguageCodes: ["es-MX", "en-US"],
+        model: "latest_long",
+      },
+      audio: {
+        uri: `gs://nessty-files/video/transcoded/${fileId}/audio.wav`,
+      },
+    };
     const [operation] = await client.longRunningRecognize(request);
     const [response] = await operation.promise();
     console.log("[SUCCESS] Transcription created");
@@ -633,10 +693,7 @@ async function transcribeAudio(fileId, environment) {
       stream.end(transcriptionData);
     }
   } catch (error) {
-    console.log(error);
-    bucket.deleteFiles({
-      prefix: `video/transcoded/${video.name}/transcription.json`,
-    });
+    console.error(error);
   }
 }
 
