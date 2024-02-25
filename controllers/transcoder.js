@@ -143,6 +143,9 @@ function getVideoDimensions(buffer) {
         const videoStream = metadata.streams.find(
           (s) => s.codec_type === "video"
         );
+        const audioStream = metadata.streams.find(
+          (stream) => stream.codec_type === "audio"
+        );
 
         if (videoStream) {
           resolve({
@@ -152,6 +155,7 @@ function getVideoDimensions(buffer) {
             bitrate: videoStream.bit_rate,
             codec: videoStream.codec_name,
             avg_frame_rate: videoStream.avg_frame_rate,
+            audio: audioStream !== undefined,
           });
         } else {
           reject(new Error("No video stream found"));
@@ -252,8 +256,11 @@ exports.transcoderVideo = async (req, res, next) => {
       input_avg_frame_rate: videoMetadata.avg_frame_rate,
     });
 
-    await extractAudioAndUpload(videoBuffer, video.name);
-    transcribeAudio(video.name);
+    if (videoMetadata?.audio) {
+      await extractAudioAndUpload(videoBuffer, video.name);
+      transcribeAudio(video.name);
+    }
+
     await processVideo(
       videoBuffer,
       video.name,
@@ -365,7 +372,7 @@ const processVideo = (
         // UPLOAD TO GOOGLE CLOUD
         //////////////////////////////
         await createMasterPlaylist(filteredStreams, fileId, uniqueDir);
-        await uploadDirToGCS(uniqueDir, fileId);
+        await uploadDirToGCS(uniqueDir, fileId, video);
         // REMOVE LOCAL DIRECTORY
         fs.rmSync(uniqueDir, { recursive: true, force: true });
         // REMOVE RAW FILES
@@ -414,7 +421,7 @@ const processVideo = (
 // UPLOAD DIR TO GOOGLE CLOUD
 ////////////////////////////
 
-const uploadDirToGCS = async (directory, fileId) => {
+const uploadDirToGCS = async (directory, fileId, video) => {
   return new Promise((resolve, reject) => {
     fs.readdir(directory, (err, files) => {
       if (err) {
@@ -434,8 +441,26 @@ const uploadDirToGCS = async (directory, fileId) => {
               resolve();
             }
           })
-          .catch((err) => {
-            reject(err);
+          .catch(async (err) => {
+            console.info("error", err);
+            video.updateOne({
+              status: "failed",
+              processing_end: moment.utc().toDate(),
+              updated: moment.utc().toDate(),
+            });
+
+            // REMOVE LOCAL DIRECTORY
+            fs.rmSync(uniqueDir, { recursive: true, force: true });
+            // REMOVE FILES FROM CLOUD STORAGE
+            await bucket.deleteFiles({
+              prefix: `video/transcoded/${video.name}`,
+            });
+            await bucket.deleteFiles({
+              prefix: `video/raw/${video.name}.mp4`,
+            });
+            await bucket.deleteFiles({
+              prefix: `video/raw/${video.name}.png`,
+            });
           });
       });
     });
@@ -549,52 +574,93 @@ const extractAudioAndUpload = async (buffer, fileId) => {
 ///////////////////////////////////
 
 async function transcribeAudio(fileId, environment) {
-  const gcsUri = `gs://nessty-files/video/transcoded/${fileId}/audio.wav`;
   const request = {
     config: {
-      languageCode: "es-MX",
+      languageCode: "es-ES",
       encoding: "LINEAR16",
       sampleRateHertz: 16000,
       enableAutomaticPunctuation: true,
-    },
-    output_config: {
-      gcs_uri: `gs://nessty-files/video/transcoded/${fileId}/transcription.json`,
+      enableWordTimeOffsets: true, // Enable word-level time offsets
     },
     audio: {
-      uri: gcsUri,
+      uri: `gs://nessty-files/video/transcoded/${fileId}/audio.wav`,
     },
   };
-  const [operation] = await client.longRunningRecognize(request);
-  operation
-    .promise()
-    .then(async () => {
-      let video;
-      if (environment === "PRODUCTION") {
-        video = await VideoProduction.findOne({
-          name: fileId,
-        });
-      } else {
-        video = await VideoSandbox.findOne({
-          name: fileId,
-        });
-      }
-      if (video && video.status !== "failed" && video.status !== "failed") {
+  try {
+    const [operation] = await client.longRunningRecognize(request);
+    const [response] = await operation.promise();
+    console.log("[SUCCESS] Transcription created");
+    let video;
+    if (environment === "PRODUCTION") {
+      video = await VideoProduction.findOne({
+        name: fileId,
+      });
+    } else {
+      video = await VideoSandbox.findOne({
+        name: fileId,
+      });
+    }
+    if (video && video.status !== "failed" && video.status !== "failed") {
+      const transcriptionFileName = `video/transcoded/${fileId}/transcription.json`;
+
+      const result = processSpeechToTextResponse(response);
+
+      console.log(result);
+
+      const transcriptionData = JSON.stringify(result);
+
+      const file = bucket.file(transcriptionFileName);
+
+      // You can either use a stream or directly upload the content
+      const stream = file.createWriteStream({
+        metadata: {
+          contentType: "application/json",
+        },
+      });
+
+      stream.on("error", (err) => {
+        console.error("Error uploading transcription:", err);
+      });
+
+      stream.on("finish", async () => {
         await video.updateOne({
           transcription: true,
           updated: moment().utc().toDate(),
         });
-        console.log("[SUCCESS] Transcription created");
-      } else {
-        // REMOVE FILES FROM CLOUD STORAGE
-        await bucket.deleteFiles({
-          prefix: `video/transcoded/${video.name}/transcription.json`,
-        });
-      }
-    })
-    .catch((error) => {
-      console.log(error);
-      bucket.deleteFiles({
-        prefix: `video/transcoded/${video.name}/transcription.json`,
+        console.log("Transcription uploaded successfully.");
+      });
+
+      stream.end(transcriptionData);
+    }
+  } catch (error) {
+    console.log(error);
+    bucket.deleteFiles({
+      prefix: `video/transcoded/${video.name}/transcription.json`,
+    });
+  }
+}
+
+const parseTime = (timeObj) => {
+  if (typeof timeObj === "string") {
+    return parseFloat(timeObj.replace("s", ""));
+  } else if (typeof timeObj === "object" && timeObj.seconds) {
+    return parseFloat(timeObj.seconds) + (timeObj.nanos || 0) / 1e9;
+  }
+  return 0;
+};
+
+const processSpeechToTextResponse = (response) => {
+  const wordsWithTimestamps = [];
+
+  response.results.forEach((result) => {
+    result.alternatives[0].words.forEach((wordInfo) => {
+      wordsWithTimestamps.push({
+        word: wordInfo.word,
+        startTime: parseTime(wordInfo.startTime),
+        endTime: parseTime(wordInfo.endTime),
       });
     });
-}
+  });
+
+  return wordsWithTimestamps;
+};
