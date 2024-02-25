@@ -582,6 +582,7 @@ async function transcribeAudio(fileId, environment) {
       enableAutomaticPunctuation: true,
       enableWordTimeOffsets: true, // Enable word-level time offsets
       alternativeLanguageCodes: ["es-MX", "en-US"],
+      model: "latest_long",
     },
     audio: {
       uri: `gs://nessty-files/video/transcoded/${fileId}/audio.wav`,
