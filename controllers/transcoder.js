@@ -429,6 +429,8 @@ async function uploadFileWithRetry(
   remoteFilePath,
   maxRetries = 5
 ) {
+  let lastError;
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       await pipeline(
@@ -443,60 +445,38 @@ async function uploadFileWithRetry(
       );
       return;
     } catch (err) {
+      lastError = err;
       console.error(
         `Attempt ${attempt} failed to upload ${localFilePath}: ${err}`
       );
-      if (attempt === maxRetries)
-        throw new Error(
-          `Failed to upload ${localFilePath} after ${maxRetries} attempts`
-        );
     }
   }
+
+  throw new Error(
+    `Failed to upload ${localFilePath} after ${maxRetries} attempts: ${lastError.message}`
+  );
 }
+//////////////////////////////
+// MANAGE CONCURRENT UPLOADS
+//////////////////////////////
+async function manageConcurrency(tasks) {
+  const executing = new Set();
+  const results = [];
 
-/////////////////////////////
-// PROCESS UPLOAD QUEUE
-////////////////////////////
-async function processUploadQueue(files, directory, fileId) {
-  const uploadTasks = [];
+  for (const task of tasks) {
+    const executeTask = task().then(() => executing.delete(executeTask));
+    executing.add(executeTask);
 
-  for (const file of files) {
-    const localFilePath = path.join(directory, file);
-    const remoteFilePath = `video/transcoded/${fileId}/${file}`;
-
-    // Create a task for each file
-    const task = async () => {
-      try {
-        await uploadFileWithRetry(localFilePath, remoteFilePath);
-      } catch (err) {
-        throw new Error(`Failed to upload ${file}: ${err.message}`);
-      }
-    };
-
-    uploadTasks.push(task);
-  }
-
-  // Function to manage concurrent uploads
-  const manageConcurrency = async (tasks, maxConcurrent) => {
-    const executing = new Set();
-    const results = [];
-
-    for (const task of tasks) {
-      const executeTask = task().then(() => executing.delete(executeTask));
-      executing.add(executeTask);
-
-      if (executing.size >= maxConcurrent) {
-        await Promise.race(executing);
-      }
-
-      results.push(executeTask);
+    if (executing.size >= maxConcurrentUploads) {
+      await Promise.race([...executing]);
     }
 
-    await Promise.all(results);
-  };
+    results.push(executeTask);
+  }
 
-  await manageConcurrency(uploadTasks, maxConcurrentUploads);
+  return Promise.allSettled(results);
 }
+
 /////////////////////////////
 // UPLOAD DIR TO GOOGLE CLOUD
 ////////////////////////////
@@ -504,8 +484,24 @@ async function processUploadQueue(files, directory, fileId) {
 const uploadDirToGCS = async (directory, fileId, video, uniqueDir) => {
   try {
     const files = await readdir(directory);
-    await processUploadQueue(files, directory, fileId);
-    console.log("All files in the directory have been uploaded.");
+    const uploadTasks = files.map((file) => {
+      const localFilePath = path.join(directory, file);
+      const remoteFilePath = `video/transcoded/${fileId}/${file}`;
+      return () => uploadFileWithRetry(localFilePath, remoteFilePath);
+    });
+
+    const results = await manageConcurrency(uploadTasks);
+    const failedUploads = results.filter((r) => r.status === "rejected");
+
+    if (failedUploads.length) {
+      console.error(
+        "Some files failed to upload:",
+        failedUploads.map((f) => f.reason)
+      );
+      throw new Error(`Failed to upload one or more files`);
+    }
+
+    console.log("All files in the directory have been processed.");
   } catch (err) {
     console.error("Error uploading directory:", err);
     video.updateOne({
