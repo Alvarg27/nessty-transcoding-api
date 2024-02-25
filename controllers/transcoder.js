@@ -576,7 +576,7 @@ const extractAudioAndUpload = async (buffer, fileId) => {
 async function transcribeAudio(fileId, environment) {
   const request = {
     config: {
-      languageCode: "es-ES",
+      languageCode: "es-MX",
       encoding: "LINEAR16",
       sampleRateHertz: 16000,
       enableAutomaticPunctuation: true,
@@ -604,8 +604,6 @@ async function transcribeAudio(fileId, environment) {
       const transcriptionFileName = `video/transcoded/${fileId}/transcription.json`;
 
       const result = processSpeechToTextResponse(response);
-
-      console.log(result);
 
       const transcriptionData = JSON.stringify(result);
 
