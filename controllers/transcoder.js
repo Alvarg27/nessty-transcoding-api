@@ -15,6 +15,8 @@ const storage = new Storage({
 const { VideoProduction, VideoSandbox } = require("../models/video");
 const bucketName = "nessty-files";
 const bucket = storage.bucket(bucketName);
+const speech = require("@google-cloud/speech");
+const client = new speech.SpeechClient({ keyFilename: "service_key.json" });
 
 function timeToSeconds(timeString) {
   // Split the time string by colon and dot
@@ -250,6 +252,8 @@ exports.transcoderVideo = async (req, res, next) => {
       input_avg_frame_rate: videoMetadata.avg_frame_rate,
     });
 
+    await extractAudioAndUpload(videoBuffer, video.name);
+    transcribeAudio(video.name);
     await processVideo(
       videoBuffer,
       video.name,
@@ -497,3 +501,100 @@ const streamThumbnailToGCP = async (buffer, fileId) => {
       .run();
   });
 };
+
+///////////////////////////////
+// EXTRACT AUDIO
+//////////////////////////////
+
+const extractAudioAndUpload = async (buffer, fileId) => {
+  const uniqueDir = path.join(tmpDir, uuidv4());
+  fs.mkdirSync(uniqueDir);
+  const file = "audio.wav";
+  const localFilePath = path.join(uniqueDir, file);
+  const remoteFilePath = `video/transcoded/${fileId}/${file}`;
+  return new Promise((resolve, reject) => {
+    ffmpeg({
+      source: Readable.from(buffer, { objectMode: false }),
+      nolog: false,
+    })
+      .setFfmpegPath(ffmpegInstaller.path)
+      .audioChannels(1) // Set audio to mono
+      .audioFrequency(16000) // Set sample rate to 16000 Hz
+      .audioCodec("pcm_s16le") // Linear PCM codec
+      .format("wav")
+      .output(localFilePath)
+      .on("end", async () => {
+        bucket
+          .upload(localFilePath, {
+            destination: remoteFilePath,
+          })
+          .then(() => {
+            console.log(`Audio successfully uploaded`);
+            fs.rmSync(uniqueDir, { recursive: true, force: true });
+            resolve();
+          })
+          .catch((err) => {
+            reject(err);
+          });
+      })
+      .on("error", (err) => {
+        reject(err);
+      })
+      .run();
+  });
+};
+
+///////////////////////////////////
+// TRANSCRIBE AUDIO
+///////////////////////////////////
+
+async function transcribeAudio(fileId, environment) {
+  const gcsUri = `gs://nessty-files/video/transcoded/${fileId}/audio.wav`;
+  const request = {
+    config: {
+      languageCode: "es-MX",
+      encoding: "LINEAR16",
+      sampleRateHertz: 16000,
+      enableAutomaticPunctuation: true,
+    },
+    output_config: {
+      gcs_uri: `gs://nessty-files/video/transcoded/${fileId}/transcription.json`,
+    },
+    audio: {
+      uri: gcsUri,
+    },
+  };
+  const [operation] = await client.longRunningRecognize(request);
+  operation
+    .promise()
+    .then(async () => {
+      let video;
+      if (environment === "PRODUCTION") {
+        video = await VideoProduction.findOne({
+          name: fileId,
+        });
+      } else {
+        video = await VideoSandbox.findOne({
+          name: fileId,
+        });
+      }
+      if (video && video.status !== "failed" && video.status !== "failed") {
+        await video.updateOne({
+          transcription: true,
+          updated: moment().utc().toDate(),
+        });
+        console.log("[SUCCESS] Transcription created");
+      } else {
+        // REMOVE FILES FROM CLOUD STORAGE
+        await bucket.deleteFiles({
+          prefix: `video/transcoded/${video.name}/transcription.json`,
+        });
+      }
+    })
+    .catch((error) => {
+      console.log(error);
+      bucket.deleteFiles({
+        prefix: `video/transcoded/${video.name}/transcription.json`,
+      });
+    });
+}
