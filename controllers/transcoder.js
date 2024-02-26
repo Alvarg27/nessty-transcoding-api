@@ -1,6 +1,5 @@
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
-const ffprobeInstaller = require("@ffprobe-installer/ffprobe");
 const moment = require("moment");
 const fs = require("fs");
 const path = require("path");
@@ -18,6 +17,8 @@ const bucketName = "nessty-files";
 const bucket = storage.bucket(bucketName);
 const speech = require("@google-cloud/speech");
 const uploadDirToGCS = require("../helpers/uploadDirToGCS");
+const generatePreviewImages = require("../helpers/generatePreviewImages");
+const extractVideoMetadata = require("../helpers/extractVideoMetadata");
 const client = new speech.SpeechClient({ keyFilename: "service_key.json" });
 
 function timeToSeconds(timeString) {
@@ -127,45 +128,6 @@ const streams = [
   },
 ];
 
-//////////////////////////////
-// GET RESOLUTION
-/////////////////////////////
-function getVideoDimensions(buffer) {
-  return new Promise((resolve, reject) => {
-    ffmpeg({
-      source: Readable.from(buffer, { objectMode: false }),
-      nolog: false,
-    })
-      .setFfprobePath(ffprobeInstaller.path)
-      .ffprobe((err, metadata) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-        const videoStream = metadata.streams.find(
-          (s) => s.codec_type === "video"
-        );
-        const audioStream = metadata.streams.find(
-          (stream) => stream.codec_type === "audio"
-        );
-
-        if (videoStream) {
-          resolve({
-            width: videoStream.width,
-            height: videoStream.height,
-            duration: videoStream.duration,
-            bitrate: videoStream.bit_rate,
-            codec: videoStream.codec_name,
-            avg_frame_rate: videoStream.avg_frame_rate,
-            audio: audioStream !== undefined,
-          });
-        } else {
-          reject(new Error("No video stream found"));
-        }
-      });
-  });
-}
-
 exports.transcoderVideo = async (req, res, next) => {
   try {
     // RETRIEVE HEADERS
@@ -223,7 +185,7 @@ exports.transcoderVideo = async (req, res, next) => {
       .file(`video/raw/${video.name}.${extension}`)
       .download();
 
-    const videoMetadata = await getVideoDimensions(videoBuffer);
+    const videoMetadata = await extractVideoMetadata(videoBuffer);
 
     if (!videoMetadata?.height || videoMetadata?.height < 144) {
       throw createHttpError.BadRequest("Minimum height for a video is 144p");
@@ -241,6 +203,12 @@ exports.transcoderVideo = async (req, res, next) => {
 
     const aspectRatio = videoMetadata?.width / videoMetadata?.height;
 
+    generatePreviewImages(
+      videoBuffer,
+      video.name,
+      videoMetadata.avg_frame_rate
+    );
+
     // UPDATE VIDEO
     await video.updateOne({
       duration: videoMetadata.duration,
@@ -251,7 +219,6 @@ exports.transcoderVideo = async (req, res, next) => {
         height: videoMetadata.height,
         width: videoMetadata.width,
       },
-
       input_bitrate: videoMetadata.bit_rate,
       input_codec: videoMetadata.codec,
       input_avg_frame_rate: videoMetadata.avg_frame_rate,
@@ -268,9 +235,7 @@ exports.transcoderVideo = async (req, res, next) => {
       filteredStreams,
       video,
       environment,
-      aspectRatio,
-      videoMetadata.avg_frame_rate,
-      videoMetadata.duration
+      aspectRatio
     );
     res.send();
   } catch (error) {
@@ -288,9 +253,7 @@ const processVideo = (
   filteredStreams,
   video,
   environment,
-  aspectRatio,
-  frameRate,
-  duration
+  aspectRatio
 ) => {
   return new Promise((resolve, reject) => {
     const uniqueDir = path.join(tmpDir, uuidv4());
@@ -346,23 +309,6 @@ const processVideo = (
           "-sc_threshold",
           "0", // Disable scene cut detection
         ]);
-    }
-
-    // GENERATE SPRITES FOR PREVIEWS
-    const intervalInSeconds = 3;
-    const fps = frameRate.split("/").reduce((a, b) => a / b);
-    const frameInterval = Math.round(intervalInSeconds * fps);
-
-    for (let frameNumber = 0; ; frameNumber += frameInterval) {
-      const frameTime = calculateTime(frameRate, frameNumber);
-      const roundedTime = Math.round(parseFloat(frameTime));
-      if (roundedTime > duration) break;
-      const outputFileName = `preview_${roundedTime}.jpg`;
-      command
-        .output(path.join(uniqueDir, outputFileName))
-        .size(`${Math.round(189 * aspectRatio)}x${189}`) // Set new resolution
-        .noAudio()
-        .outputOptions([`-ss ${frameTime}`, "-vframes 1"]);
     }
 
     // Generating Thumbnail
@@ -604,13 +550,3 @@ const processSpeechToTextResponse = (response) => {
 
   return wordsWithTimestamps;
 };
-
-/////////////////////////////
-//  CALCULATE TIME
-/////////////////////////////
-
-function calculateTime(frameRate, frameNumber) {
-  const [numerator, denominator] = frameRate.split("/").map(Number);
-  const fps = numerator / denominator;
-  return (frameNumber / fps).toFixed(3);
-}
