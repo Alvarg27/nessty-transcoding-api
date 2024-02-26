@@ -1,7 +1,7 @@
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
 const { Readable } = require("stream");
-const fs = require("fs-extra");
+const fs = require("fs");
 const path = require("path");
 const uploadDirToGCS = require("./uploadDirToGCS");
 const tmpDir = require("os").tmpdir();
