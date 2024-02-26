@@ -9,52 +9,73 @@ const storage = new Storage({
 const bucketName = "nessty-files";
 const bucket = storage.bucket(bucketName);
 
-const generateIntervalPreviews = async (buffer, fileId, duration) => {
-  try {
-    const interval = 3;
-    for (let currentTime = 0; currentTime < duration; currentTime += interval) {
-      const outputFileName = `preview_${currentTime}.jpg`;
-      await streamFrameToStorage(
-        buffer,
-        `video/transcoded/${fileId}/${outputFileName}`,
-        currentTime
-      );
-      console.log(`Uploaded ${outputFileName}`);
-    }
-    console.log("All previews processed and uploaded.");
-  } catch (error) {
-    console.error("Error in processing and uploading images:", error);
-  }
-};
+function calculateTime(frameRate, frameNumber) {
+  const [numerator, denominator] = frameRate.split("/").map(Number);
+  const fps = numerator / denominator;
+  return (frameNumber / fps).toFixed(3);
+}
 
-function streamFrameToStorage(buffer, remoteFilePath, startTime) {
+async function streamFrameToStorage(buffer, remoteFilePath, frameTime) {
   return new Promise((resolve, reject) => {
-    const adjustedStartTime = startTime === 0 ? 0.01 : startTime;
     const passThroughStream = new PassThrough();
     const fileWriteStream = bucket.file(remoteFilePath).createWriteStream({
-      metadata: {
-        contentType: "image/jpeg",
-      },
+      metadata: { contentType: "image/jpeg" },
     });
 
-    fileWriteStream.on("finish", resolve).on("error", reject);
+    fileWriteStream
+      .on("finish", () => {
+        console.log(`Upload finished for: ${remoteFilePath}`);
+        resolve();
+      })
+      .on("error", (error) => {
+        console.error(`Error during upload: ${error.message}`);
+        reject(error);
+      });
+
     passThroughStream.pipe(fileWriteStream);
-    ffmpeg({
-      source: Readable.from(buffer, { objectMode: false }),
-      nolog: false,
-    })
+
+    const ffmpegStream = ffmpeg()
+      .input(Readable.from(buffer))
       .setFfmpegPath(ffmpegInstaller.path)
-      .setStartTime(adjustedStartTime)
+      .outputOptions([`-ss ${frameTime}`, "-vframes 1", "-s 426x240"])
       .outputFormat("image2")
-      .outputOptions([
-        "-frames:v 2",
-        "-force_key_frames", // Force keyframes at specified intervals
-        "expr:gte(t,n_forced*3)",
-        `-vf scale=426x240`,
-      ])
-      .on("error", reject)
+      .on("error", (error) => {
+        console.error(`Error during FFmpeg processing: ${error.message}`);
+        reject(error);
+      })
       .pipe(passThroughStream, { end: true });
+
+    ffmpegStream.on("end", () => {
+      console.log(`FFmpeg processing finished for: ${remoteFilePath}`);
+    });
   });
 }
 
-module.exports = generateIntervalPreviews;
+async function generateVideoPreviews(buffer, fileId, duration, frameRate) {
+  const intervalInSeconds = 3;
+  const fps = frameRate.split("/").reduce((a, b) => a / b);
+  const frameInterval = Math.round(intervalInSeconds * fps);
+
+  for (let frameNumber = 0; ; frameNumber += frameInterval) {
+    const frameTime = calculateTime(frameRate, frameNumber);
+    const roundedTime = Math.round(parseFloat(frameTime)); // Round to nearest whole number
+
+    // Break the loop if the calculated time exceeds the video duration
+    if (roundedTime > duration) break;
+
+    const outputFileName = `preview_${roundedTime}.jpg`;
+
+    try {
+      await streamFrameToStorage(
+        buffer,
+        `video/transcoded/${fileId}/${outputFileName}`,
+        frameTime
+      );
+      console.log(`Processed and uploaded ${outputFileName}`);
+    } catch (error) {
+      console.error(`Error in processing ${outputFileName}: ${error.message}`);
+      // Decide how to handle individual errors - retry, continue, or abort
+    }
+  }
+}
+module.exports = generateVideoPreviews;

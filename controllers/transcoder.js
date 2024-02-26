@@ -268,7 +268,8 @@ exports.transcoderVideo = async (req, res, next) => {
     await generateIntervalPreviews(
       videoBuffer,
       video.name,
-      videoMetadata.duration
+      videoMetadata?.duration,
+      videoMetadata?.avg_frame_rate
     );
 
     await processVideo(
