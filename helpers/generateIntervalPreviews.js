@@ -29,6 +29,7 @@ const generateIntervalPreviews = async (buffer, fileId, duration) => {
 
 function streamFrameToStorage(buffer, remoteFilePath, startTime) {
   return new Promise((resolve, reject) => {
+    const adjustedStartTime = startTime === 0 ? 0.01 : startTime;
     const passThroughStream = new PassThrough();
     const fileWriteStream = bucket.file(remoteFilePath).createWriteStream({
       metadata: {
@@ -43,7 +44,7 @@ function streamFrameToStorage(buffer, remoteFilePath, startTime) {
       nolog: false,
     })
       .setFfmpegPath(ffmpegInstaller.path)
-      .setStartTime(startTime)
+      .setStartTime(adjustedStartTime)
       .outputFormat("image2")
       .outputOptions(["-frames:v 1", `-vf scale=426x240`])
       .on("error", reject)
