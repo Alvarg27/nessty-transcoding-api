@@ -17,7 +17,6 @@ const { VideoProduction, VideoSandbox } = require("../models/video");
 const bucketName = "nessty-files";
 const bucket = storage.bucket(bucketName);
 const speech = require("@google-cloud/speech");
-const generateIntervalPreviews = require("../helpers/generateIntervalPreviews");
 const uploadDirToGCS = require("../helpers/uploadDirToGCS");
 const client = new speech.SpeechClient({ keyFilename: "service_key.json" });
 
@@ -263,20 +262,15 @@ exports.transcoderVideo = async (req, res, next) => {
       transcribeAudio(video.name);
     }
 
-    await generateIntervalPreviews(
-      videoBuffer,
-      video.name,
-      videoMetadata?.duration,
-      videoMetadata?.avg_frame_rate
-    );
-
     await processVideo(
       videoBuffer,
       video.name,
       filteredStreams,
       video,
       environment,
-      aspectRatio
+      aspectRatio,
+      videoMetadata.avg_frame_rate,
+      videoMetadata.duration
     );
     res.send();
   } catch (error) {
@@ -294,7 +288,9 @@ const processVideo = (
   filteredStreams,
   video,
   environment,
-  aspectRatio
+  aspectRatio,
+  frameRate,
+  duration
 ) => {
   return new Promise((resolve, reject) => {
     const uniqueDir = path.join(tmpDir, uuidv4());
@@ -352,9 +348,27 @@ const processVideo = (
         ]);
     }
 
+    // GENERATE SPRITES FOR PREVIEWS
+    const intervalInSeconds = 3;
+    const fps = frameRate.split("/").reduce((a, b) => a / b);
+    const frameInterval = Math.round(intervalInSeconds * fps);
+
+    for (let frameNumber = 0; ; frameNumber += frameInterval) {
+      const frameTime = calculateTime(frameRate, frameNumber);
+      const roundedTime = Math.round(parseFloat(frameTime));
+      if (roundedTime > duration) break;
+      const outputFileName = `preview_${roundedTime}.jpg`;
+      command
+        .output(path.join(uniqueDir, outputFileName))
+        .size(`${Math.round(189 * aspectRatio)}x${189}`) // Set new resolution
+        .noAudio()
+        .outputOptions([`-ss ${frameTime}`, "-vframes 1"]);
+    }
+
     // Generating Thumbnail
     command
       .output(path.join(uniqueDir, "thumbnail.png"))
+      .size(`${Math.round(720 * aspectRatio)}x${720}`)
       .frames(1)
       .noAudio()
       .seek("00:00:03");
@@ -590,3 +604,13 @@ const processSpeechToTextResponse = (response) => {
 
   return wordsWithTimestamps;
 };
+
+/////////////////////////////
+//  CALCULATE TIME
+/////////////////////////////
+
+function calculateTime(frameRate, frameNumber) {
+  const [numerator, denominator] = frameRate.split("/").map(Number);
+  const fps = numerator / denominator;
+  return (frameNumber / fps).toFixed(3);
+}

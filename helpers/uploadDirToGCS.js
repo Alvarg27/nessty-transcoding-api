@@ -4,7 +4,7 @@ const { Storage } = require("@google-cloud/storage");
 const storage = new Storage({
   keyFilename: "service_key.json",
 });
-const maxConcurrentUploads = 5;
+const maxConcurrentUploads = 10;
 const { promisify } = require("util");
 const readdir = promisify(fs.readdir);
 const pipeline = promisify(require("stream").pipeline);
