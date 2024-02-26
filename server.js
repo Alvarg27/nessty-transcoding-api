@@ -64,6 +64,6 @@ app.use((err, req, res, next) => {
 });
 
 const port = process.env.PORT || 8080;
-const server = app.listen(port, () => {
+app.listen(port, () => {
   console.log(`App listening on http://localhost:${port}`);
 });
