@@ -226,7 +226,6 @@ exports.transcoderVideo = async (req, res, next) => {
       .file(`video/raw/${video.name}.${extension}`)
       .download();
 
-    await streamThumbnailToGCP(videoBuffer, video.name);
     const videoMetadata = await getVideoDimensions(videoBuffer);
 
     if (!videoMetadata?.height || videoMetadata?.height < 144) {
@@ -556,37 +555,6 @@ const createMasterPlaylist = async (filteredStreams, fileId, uniqueDir) => {
       .catch((err) => {
         reject(err);
       });
-  });
-};
-
-/////////////////////////////
-// GENERATE INITIAL THUMBNAIL
-////////////////////////////
-
-const streamThumbnailToGCP = async (buffer, fileId) => {
-  return new Promise((resolve, reject) => {
-    const file = bucket.file(`video/raw/${fileId}.png`);
-    const thumbnailStream = file.createWriteStream();
-
-    ffmpeg({
-      source: Readable.from(buffer, { objectMode: false }),
-      nolog: false,
-    })
-      .setFfmpegPath(ffmpegInstaller.path)
-      .inputFormat("mp4") // or the appropriate format of your video
-      .seek("00:00:03")
-      .outputOptions(["-frames:v 1", `-vf scale=426x240`])
-      .outputFormat("image2pipe")
-      .output(thumbnailStream)
-      .on("end", () => {
-        console.log("Thumbnail streamed to GCP");
-        resolve();
-      })
-      .on("error", (err) => {
-        console.error("Error streaming thumbnail:", err);
-        reject(err);
-      })
-      .run();
   });
 };
 
