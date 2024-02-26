@@ -1,13 +1,11 @@
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
-const { Readable, PassThrough } = require("stream");
-const { Storage } = require("@google-cloud/storage");
-
-const storage = new Storage({
-  keyFilename: "service_key.json",
-});
-const bucketName = "nessty-files";
-const bucket = storage.bucket(bucketName);
+const { Readable } = require("stream");
+const fs = require("fs-extra");
+const path = require("path");
+const uploadDirToGCS = require("./uploadDirToGCS");
+const tmpDir = require("os").tmpdir();
+const { v4: uuidv4 } = require("uuid");
 
 function calculateTime(frameRate, frameNumber) {
   const [numerator, denominator] = frameRate.split("/").map(Number);
@@ -15,67 +13,58 @@ function calculateTime(frameRate, frameNumber) {
   return (frameNumber / fps).toFixed(3);
 }
 
-async function streamFrameToStorage(buffer, remoteFilePath, frameTime) {
-  return new Promise((resolve, reject) => {
-    const passThroughStream = new PassThrough();
-    const fileWriteStream = bucket.file(remoteFilePath).createWriteStream({
-      metadata: { contentType: "image/jpeg" },
-    });
-
-    fileWriteStream
-      .on("finish", () => {
-        console.log(`Upload finished for: ${remoteFilePath}`);
-        resolve();
-      })
-      .on("error", (error) => {
-        console.error(`Error during upload: ${error.message}`);
-        reject(error);
-      });
-
-    passThroughStream.pipe(fileWriteStream);
-
-    const ffmpegStream = ffmpeg()
-      .input(Readable.from(buffer))
-      .setFfmpegPath(ffmpegInstaller.path)
-      .outputOptions([`-ss ${frameTime}`, "-vframes 1", "-s 426x240"])
-      .outputFormat("image2")
-      .on("error", (error) => {
-        console.error(`Error during FFmpeg processing: ${error.message}`);
-        reject(error);
-      })
-      .pipe(passThroughStream, { end: true });
-
-    ffmpegStream.on("end", () => {
-      console.log(`FFmpeg processing finished for: ${remoteFilePath}`);
-    });
-  });
-}
-
-async function generateVideoPreviews(buffer, fileId, duration, frameRate) {
+async function generateVideoPreviews(
+  buffer,
+  fileId,
+  duration,
+  frameRate,
+  cloudDirectory,
+  video
+) {
   const intervalInSeconds = 3;
   const fps = frameRate.split("/").reduce((a, b) => a / b);
   const frameInterval = Math.round(intervalInSeconds * fps);
+  const uniqueDir = path.join(tmpDir, uuidv4());
+  fs.mkdirSync(uniqueDir);
+
+  const ffmpegCommand = ffmpeg({ source: Readable.from(buffer) }).setFfmpegPath(
+    ffmpegInstaller.path
+  );
 
   for (let frameNumber = 0; ; frameNumber += frameInterval) {
     const frameTime = calculateTime(frameRate, frameNumber);
-    const roundedTime = Math.round(parseFloat(frameTime)); // Round to nearest whole number
+    const roundedTime = Math.round(parseFloat(frameTime));
 
-    // Break the loop if the calculated time exceeds the video duration
     if (roundedTime > duration) break;
-
     const outputFileName = `preview_${roundedTime}.jpg`;
+    ffmpegCommand
+      .output(path.join(uniqueDir, outputFileName))
+      .outputOptions([`-ss ${frameTime}`, "-vframes 1", "-s 426x240"])
+      .noAudio();
+  }
+  try {
+    await new Promise((resolve, reject) => {
+      ffmpegCommand
+        .on("end", () => {
+          console.log("All previews generated");
+          resolve();
+        })
+        .on("error", (err) => {
+          console.error(`Error during FFmpeg processing: ${err.message}`);
+          reject(err);
+        })
+        .run();
+    });
 
-    try {
-      await streamFrameToStorage(
-        buffer,
-        `video/transcoded/${fileId}/${outputFileName}`,
-        frameTime
-      );
-      console.log(`Processed and uploaded ${outputFileName}`);
-    } catch (error) {
-      console.error(`Error in processing ${outputFileName}: ${error.message}`);
-      // Decide how to handle individual errors - retry, continue, or abort
-    }
+    // Upload the directory using your existing function
+    await uploadDirToGCS(uniqueDir, fileId);
+    console.log("All previews uploaded");
+  } catch (error) {
+    console.error(`Error during processing: ${error.message}`);
+  } finally {
+    // REMOVE LOCAL DIRECTORY
+    fs.rmSync(uniqueDir, { recursive: true, force: true });
   }
 }
+
 module.exports = generateVideoPreviews;
