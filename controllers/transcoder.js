@@ -20,6 +20,7 @@ const { VideoProduction, VideoSandbox } = require("../models/video");
 const bucketName = "nessty-files";
 const bucket = storage.bucket(bucketName);
 const speech = require("@google-cloud/speech");
+const generateIntervalPreviews = require("../helpers/generateIntervalPreviews");
 const client = new speech.SpeechClient({ keyFilename: "service_key.json" });
 
 function timeToSeconds(timeString) {
@@ -264,6 +265,12 @@ exports.transcoderVideo = async (req, res, next) => {
       await extractAudioAndUpload(videoBuffer, video.name);
       transcribeAudio(video.name);
     }
+
+    await generateIntervalPreviews(
+      videoBuffer,
+      video.name,
+      videoMetadata.duration
+    );
 
     await processVideo(
       videoBuffer,
