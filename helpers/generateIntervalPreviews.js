@@ -46,7 +46,12 @@ function streamFrameToStorage(buffer, remoteFilePath, startTime) {
       .setFfmpegPath(ffmpegInstaller.path)
       .setStartTime(adjustedStartTime)
       .outputFormat("image2")
-      .outputOptions(["-frames:v 1", `-vf scale=426x240`])
+      .outputOptions([
+        "-frames:v 2",
+        "-force_key_frames", // Force keyframes at specified intervals
+        "expr:gte(t,n_forced*3)",
+        `-vf scale=426x240`,
+      ])
       .on("error", reject)
       .pipe(passThroughStream, { end: true });
   });
