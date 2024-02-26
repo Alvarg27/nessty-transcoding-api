@@ -13,14 +13,7 @@ function calculateTime(frameRate, frameNumber) {
   return (frameNumber / fps).toFixed(3);
 }
 
-async function generateVideoPreviews(
-  buffer,
-  fileId,
-  duration,
-  frameRate,
-  cloudDirectory,
-  video
-) {
+async function generateVideoPreviews(buffer, fileId, duration, frameRate) {
   const intervalInSeconds = 3;
   const fps = frameRate.split("/").reduce((a, b) => a / b);
   const frameInterval = Math.round(intervalInSeconds * fps);
